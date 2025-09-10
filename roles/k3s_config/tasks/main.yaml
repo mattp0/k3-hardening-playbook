@@ -1,4 +1,5 @@
 ---
+# Ensure dirs (masters only)
 - name: Create required directories (masters only)
   tags: [k3s]
   when: "'masters' in group_names"
@@ -11,6 +12,24 @@
     - /var/lib/rancher/k3s/server/logs
     - /etc/kubernetes/audit
 
+# Group + membership for reading kubeconfig without sudo
+- name: Ensure kubeconfig group exists (masters only)
+  tags: [k3s]
+  when: "'masters' in group_names"
+  group:
+    name: "{{ kubeconfig_group | default('kube') }}"
+    state: present
+
+- name: Ensure users are in kubeconfig group (masters only)
+  tags: [k3s]
+  when: "'masters' in group_names"
+  user:
+    name: "{{ item }}"
+    groups: "{{ kubeconfig_group | default('kube') }}"
+    append: true
+  loop: "{{ kubeconfig_group_users | default(['matt']) }}"
+
+# Deploy k3s config with group-readable kubeconfig
 - name: Deploy k3s config (masters only)
   tags: [k3s]
   when: "'masters' in group_names"
@@ -18,7 +37,9 @@
     src: k3s_config.yaml.j2
     dest: /etc/rancher/k3s/config.yaml
     mode: "0644"
+  notify: restart k3s
 
+# Minimal audit policy (optional)
 - name: Minimal audit policy (masters only, when enabled)
   tags: [k3s]
   when: "'masters' in group_names and enable_k3s_audit"
@@ -31,9 +52,50 @@
       rules:
         - level: Metadata
 
+# Restart k3s if config changed (masters only)
 - name: Reload systemd and restart k3s if present (masters only)
   tags: [k3s]
   when: "'masters' in group_names"
   shell: |
     systemctl daemon-reload || true
     systemctl restart k3s || true
+  listen: restart k3s
+  notify: fix kubeconfig perms
+
+# Enforce group/mode on admin kubeconfig after restart
+- name: Fix kubeconfig perms (masters only)
+  tags: [k3s]
+  when: "'masters' in group_names"
+  file:
+    path: /etc/rancher/k3s/k3s.yaml
+    state: file
+    owner: root
+    group: "{{ kubeconfig_group | default('kube') }}"
+    mode: "0640"
+
+# Optional: per-user symlink to admin kubeconfig
+- name: Ensure ~/.kube exists for users (masters only)
+  tags: [k3s]
+  when:
+    - "'masters' in group_names"
+    - create_user_kubeconfig_symlink | default(true)
+  file:
+    path: "/home/{{ item }}/.kube"
+    state: directory
+    owner: "{{ item }}"
+    group: "{{ kubeconfig_group | default('kube') }}"
+    mode: "0750"
+  loop: "{{ kubeconfig_group_users | default(['matt']) }}"
+
+- name: Symlink user kubeconfig to admin kubeconfig (masters only)
+  tags: [k3s]
+  when:
+    - "'masters' in group_names"
+    - create_user_kubeconfig_symlink | default(true)
+  file:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: "/home/{{ item }}/.kube/config"
+    state: link
+    owner: "{{ item }}"
+    group: "{{ kubeconfig_group | default('kube') }}"
+  loop: "{{ kubeconfig_group_users | default(['matt']) }}"

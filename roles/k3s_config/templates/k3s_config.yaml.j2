@@ -1,18 +1,22 @@
 tls-san:
-{% for name in k3s_tls_sans %}
-- {{ name }}
+{% for name in k3s_tls_sans %}  - {{ name }}
 {% endfor %}
 write-kubeconfig-mode: "0640"
+write-kubeconfig-group: "{{ kubeconfig_group | default('kube') }}"
 kube-apiserver-arg:
-- authorization-mode=Node,RBAC
+  - authorization-mode=Node,RBAC
 {% if enable_k3s_audit %}
-- audit-log-path=/var/lib/rancher/k3s/server/logs/audit.log
-- audit-log-maxage=7
-- audit-log-maxsize=100
-- audit-policy-file=/etc/kubernetes/audit/policy.yaml
+  - audit-log-path=/var/lib/rancher/k3s/server/logs/audit.log
+  - audit-log-maxage=7
+  - audit-log-maxsize=100
+  - audit-policy-file=/etc/kubernetes/audit/policy.yaml
 {% endif %}
 kubelet-arg:
-- authentication-token-webhook=true
-- anonymous-auth=false
+  - authentication-token-webhook=true
+  - anonymous-auth=false
+  - kube-reserved=cpu=200m,memory=256Mi,ephemeral-storage=1Gi
+  - system-reserved=cpu=200m,memory=256Mi,ephemeral-storage=1Gi
+  - eviction-hard=memory.available<200Mi,nodefs.available<10%,imagefs.available<10%
+  - eviction-minimum-reclaim=memory.available=100Mi,nodefs.available=5%,imagefs.available=5%
 disable:
-- traefik
+  - traefik
