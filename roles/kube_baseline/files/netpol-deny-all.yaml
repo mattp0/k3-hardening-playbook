@@ -3,8 +3,8 @@ kind: NetworkPolicy
 metadata:
   name: default-deny-all
   namespace: prod
-  spec:
-    podSelector: {}
-    policyTypes:
-    - Ingress
-    - Egress
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
