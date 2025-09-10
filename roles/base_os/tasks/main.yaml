@@ -2,21 +2,30 @@
 - name: Ensure base packages
   tags: [base]
   apt:
-    name:
-    - unattended-upgrades
-    - ufw
-    - fail2ban
-    - curl
-    - jq
-    - lsof
-    state: present
     update_cache: true
+    name:
+      - unattended-upgrades
+      - ufw
+      - fail2ban
+      - curl
+      - jq
+      - lsof
+    state: present
 
-
-- name: Enable unattended upgrades
+- name: Enable unattended upgrades (via debconf)
   tags: [base]
   debconf:
-  name: unattended-upgrades
-  question: unattended-upgrades/enable_auto_updates
-  value: "true"
-  vtype: boolean
+    name: unattended-upgrades
+    question: unattended-upgrades/enable_auto_updates
+    value: "true"
+    vtype: boolean
+
+# (Optional but recommended on Ubuntu)
+- name: Ensure auto-upgrades config file exists
+  tags: [base]
+  copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
