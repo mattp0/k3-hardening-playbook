@@ -1,13 +1,14 @@
 ---
-# 1) Ensure VIP is in TLS SANs so API cert matches the VIP
 - name: Ensure /etc/rancher/k3s/config.yaml exists (masters only)
   when: "'masters' in group_names"
+  tags: [kube_vip]
   file:
     path: /etc/rancher/k3s/config.yaml
     state: touch
 
 - name: Ensure tls-san header present (masters only)
   when: "'masters' in group_names"
+  tags: [kube_vip]
   lineinfile:
     path: /etc/rancher/k3s/config.yaml
     regexp: '^tls-san:'
@@ -16,24 +17,27 @@
 
 - name: Add VIP to tls-san list (masters only)
   when: "'masters' in group_names"
+  tags: [kube_vip]
   lineinfile:
     path: /etc/rancher/k3s/config.yaml
     regexp: '^\s*-\s*{{ kube_vip_ip | regex_escape() }}\s*$'
     insertafter: '^tls-san:'
     line: "  - {{ kube_vip_ip }}"
+  register: vip_san
   notify: restart k3s
 
-# 2) Apply kube-vip RBAC once
-- name: Apply kube-vip RBAC
+- name: Apply kube-vip RBAC (ServiceAccount/ClusterRole/Binding)
   run_once: true
+  tags: [kube_vip]
   command: kubectl apply -f https://kube-vip.io/manifests/rbac.yaml
   changed_when: false
 
-# 3) Deploy the simplest kube-vip DaemonSet (masters only)
-- name: Deploy kube-vip DaemonSet
+- name: Write kube-vip DaemonSet manifest (masters only)
   when: "'masters' in group_names"
+  tags: [kube_vip]
   copy:
     dest: /tmp/kube-vip-ds.yaml
+    mode: "0644"
     content: |
       apiVersion: apps/v1
       kind: DaemonSet
@@ -48,6 +52,7 @@
             labels: { app.kubernetes.io/name: kube-vip }
           spec:
             hostNetwork: true
+            serviceAccountName: kube-vip
             tolerations:
             - key: "node-role.kubernetes.io/control-plane"
               operator: "Exists"
@@ -55,8 +60,16 @@
             - key: "node-role.kubernetes.io/master"
               operator: "Exists"
               effect: "NoSchedule"
-            nodeSelector:
-              node-role.kubernetes.io/control-plane: "true"
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: node-role.kubernetes.io/control-plane
+                      operator: Exists
+                  - matchExpressions:
+                    - key: node-role.kubernetes.io/master
+                      operator: Exists
             containers:
             - name: kube-vip
               image: ghcr.io/kube-vip/kube-vip:v0.7.2
@@ -64,21 +77,29 @@
               securityContext:
                 capabilities:
                   add: ["NET_ADMIN","NET_RAW","SYS_TIME"]
+              args: ["manager"]
               env:
+              # VIP basics
               - name: address
                 value: "{{ kube_vip_ip }}"
-              - name: port
-                value: "6443"
               - name: vip_interface
                 value: "{{ kube_vip_iface }}"
+              - name: port
+                value: "6443"
               - name: vip_arp
                 value: "true"
               - name: vip_leaderelection
                 value: "true"
-              - name: lb_enable
+              # Enable control-plane feature
+              - name: cp_enable
+                value: "true"
+              - name: cp_namespace
+                value: "kube-system"
+              # We are not using Service LB here
+              - name: svc_enable
                 value: "false"
-              args: ["manager"]
 
-- name: Apply kube-vip manifest
+- name: Apply kube-vip DaemonSet
+  tags: [kube_vip]
   command: kubectl -n kube-system apply -f /tmp/kube-vip-ds.yaml
   changed_when: false
