@@ -2,15 +2,15 @@
 - name: Ensure base packages
   tags: [base]
   apt:
-  name:
-  - unattended-upgrades
-  - ufw
-  - fail2ban
-  - curl
-  - jq
-  - lsof
-  state: present
-  update_cache: true
+    name:
+    - unattended-upgrades
+    - ufw
+    - fail2ban
+    - curl
+    - jq
+    - lsof
+    state: present
+    update_cache: true
 
 
 - name: Enable unattended upgrades
