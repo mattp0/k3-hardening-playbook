@@ -1,0 +1,44 @@
+# Inventories & host vars with real IPs/hostnames
+inventory.ini
+hosts
+host_vars/
+group_vars/all.yaml
+group_vars/*/secrets*.yaml
+
+# Secrets & creds
+**/*.pem
+**/*.key
+**/*_key
+**/private_key*
+**/id_rsa*
+**/id_ed25519*
+**/*.pfx
+**/*.p12
+**/*.crt
+**/*.der
+**/*.jks
+**/*.kubeconfig
+.kube/
+kubeconfig
+secrets/
+.env
+.env.*
+
+# Ansible Vault password (never commit this)
+.vault_pass.txt
+vault_pass.txt
+
+# Etcd/k3s backups, logs, artifacts
+**/snapshots/
+**/*.db
+**/*.log
+
+# Ansible artifacts
+*.retry
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
