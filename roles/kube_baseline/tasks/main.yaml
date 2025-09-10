@@ -1,13 +1,30 @@
 ---
+- name: Pick an apply host (first master)
+  tags: [kube]
+  run_once: true
+  set_fact:
+    apply_host: "{{ groups['masters'][0] }}"
+
+- name: Copy baseline manifests to apply host
+  tags: [kube]
+  run_once: true
+  delegate_to: "{{ apply_host }}"
+  copy:
+    src: "{{ item }}"
+    dest: "/tmp/{{ item }}"
+    mode: "0644"
+  loop:
+    - pss-restricted-namespace.yaml
+    - netpol-deny-all.yaml
+
 - name: Apply PSS enforced namespace
   tags: [kube]
-  command: kubectl apply -f pss-restricted-namespace.yaml
-  args:
-    chdir: "{{ role_path }}/files"
-
+  run_once: true
+  delegate_to: "{{ apply_host }}"
+  command: kubectl apply -f /tmp/pss-restricted-namespace.yaml
 
 - name: Apply default deny NetworkPolicy
   tags: [kube]
-  command: kubectl apply -f netpol-deny-all.yaml
-  args:
-    chdir: "{{ role_path }}/files"
+  run_once: true
+  delegate_to: "{{ apply_host }}"
+  command: kubectl apply -f /tmp/netpol-deny-all.yaml
