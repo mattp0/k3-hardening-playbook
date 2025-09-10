@@ -14,6 +14,9 @@ ansible -m ping all
 ansible-playbook -i inventory.ini site.yaml --check
 ansible-playbook -i inventory.ini site.yaml -K
 
-ansible-playbook -i inventory.ini site.yaml -l masters --tags "ssh,ufw,fail2ban,mdns" -K
-ansible-playbook -i inventory.ini site.yaml -l workers --tags "ssh,ufw,fail2ban,mdns" -K
+ansible-playbook -i inventory.ini site.yaml -l workers --tags "base,ssh,ufw,fail2ban,mdns" -K
+ansible-playbook -i inventory.ini site.yaml -l masters --tags "base,ssh,ufw,fail2ban,mdns" -K
 ansible-playbook -i inventory.ini site.yaml -l masters --tags k3s -K
+ansible-playbook -i inventory.ini site.yaml -l masters --tags kube_vip -K
+ansible-playbook -i inventory.ini site.yaml -l masters --tags kube -K
+ansible-playbook -i inventory.ini site.yaml --tags metrics -K 
