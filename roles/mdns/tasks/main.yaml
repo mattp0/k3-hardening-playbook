@@ -5,7 +5,7 @@
     name: avahi-daemon
     state: present
     update_cache: true
-    when: install_avahi
+  when: install_avahi
 
 
 - name: Ensure avahi-daemon is enabled (if installed)
@@ -14,4 +14,4 @@
     name: avahi-daemon
     state: started
     enabled: true
-    when: install_avahi
+  when: install_avahi
