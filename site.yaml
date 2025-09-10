@@ -12,3 +12,4 @@
   - role: k3s_config
   - role: kube_baseline
   - { role: kube_vip, when: enable_kube_vip | default(false), tags: ["kube_vip"] }
+  - { role: metrics_server, tags: ["metrics"] }
