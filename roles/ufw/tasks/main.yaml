@@ -65,5 +65,5 @@
 
 
 - debug:
-  var: ufw_status.stdout_lines
-  tags: [ufw]
+    var: ufw_status.stdout_lines
+    tags: [ufw]
