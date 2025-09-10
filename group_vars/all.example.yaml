@@ -1,0 +1,19 @@
+# LAN / Firewall
+lan_cidr: "192.168.0.0/24"
+ssh_port: 22
+
+
+# mDNS
+enable_mdns: true
+install_avahi: true
+
+
+# SSH hardening
+disable_root_ssh: true
+disable_password_auth: true
+ssh_additional_config: []
+
+
+# k3s config (masters only)
+k3s_tls_sans: ["cluster-vip.local", "192.168.0.10"]
+enable_k3s_audit: true

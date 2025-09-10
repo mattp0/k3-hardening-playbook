@@ -1,0 +1,16 @@
+Port {{ ssh_port }}
+Protocol 2
+HostKey /etc/ssh/ssh_host_ed25519_key
+UsePAM yes
+PermitRootLogin {{ 'no' if disable_root_ssh else 'prohibit-password' }}
+PasswordAuthentication {{ 'no' if disable_password_auth else 'yes' }}
+ChallengeResponseAuthentication no
+PubkeyAuthentication yes
+X11Forwarding no
+AllowTcpForwarding no
+ClientAliveInterval 300
+ClientAliveCountMax 2
+AddressFamily any
+UseDNS no
+{% for line in ssh_additional_config %}{{ line }}
+{% endfor %}

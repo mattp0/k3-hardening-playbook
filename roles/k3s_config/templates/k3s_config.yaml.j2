@@ -1,0 +1,18 @@
+tls-san:
+{% for name in k3s_tls_sans %}
+- {{ name }}
+{% endfor %}
+write-kubeconfig-mode: "0640"
+kube-apiserver-arg:
+- authorization-mode=Node,RBAC
+{% if enable_k3s_audit %}
+- audit-log-path=/var/lib/rancher/k3s/server/logs/audit.log
+- audit-log-maxage=7
+- audit-log-maxsize=100
+- audit-policy-file=/etc/kubernetes/audit/policy.yaml
+{% endif %}
+kubelet-arg:
+- authentication-token-webhook=true
+- anonymous-auth=false
+disable:
+- traefik

@@ -1,0 +1,13 @@
+- name: Harden Ubuntu nodes for k3s
+  hosts: all
+  become: true
+  gather_facts: true
+  serial: 1
+  roles:
+  - role: base_os
+  - role: ssh_hardening
+  - role: ufw
+  - role: fail2ban
+  - role: mdns
+  - role: k3s_config
+  - role: kube_baseline

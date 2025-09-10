@@ -1,0 +1,7 @@
+[sshd]
+enabled = true
+port = {{ ssh_port }}
+logpath = %(sshd_log)s
+backend = systemd
+maxretry = 5
+bantime = 1h
