@@ -90,6 +90,35 @@
     port: "8472"
     src: "{{ lan_cidr }}"
 
+- name: Ensure forward policy ACCEPT
+  tags: [ufw]
+  lineinfile:
+    path: /etc/default/ufw
+    regexp: '^DEFAULT_FORWARD_POLICY='
+    line: 'DEFAULT_FORWARD_POLICY="ACCEPT"'
+
+- name: Allow overlay interface traffic (flannel in/out)
+  tags: [ufw]
+  ufw: { rule: allow, interface: "flannel.1", direction: in }
+- name: Allow overlay interface traffic (flannel out)
+  tags: [ufw]
+  ufw: { rule: allow, interface: "flannel.1", direction: out }
+
+- name: Allow CNI bridge traffic (cni0 in/out)
+  tags: [ufw]
+  ufw: { rule: allow, interface: "cni0", direction: in }
+- name: Allow CNI bridge traffic (cni0 out)
+  tags: [ufw]
+  ufw: { rule: allow, interface: "cni0", direction: out }
+
+- name: Allow kubelet 10250 from pod CIDR
+  tags: [ufw]
+  ufw:
+    rule: allow
+    proto: tcp
+    port: "10250"
+    src: "10.42.0.0/16"
+
 - name: Show UFW status
   tags: [ufw]
   command: ufw status verbose

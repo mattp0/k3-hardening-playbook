@@ -1,0 +1,22 @@
+---
+- name: Install/refresh metrics-server components
+  tags: [metrics]
+  command: kubectl -n kube-system apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+  changed_when: false
+
+- name: Patch metrics-server args for k3s/bare metal
+  tags: [metrics]
+  command: >
+    kubectl -n kube-system patch deploy metrics-server --type='json'
+    -p='[
+      {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"},
+      {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-preferred-address-types=InternalIP,Hostname,InternalDNS,ExternalDNS,ExternalIP"}
+    ]'
+  register: patch_out
+  failed_when: patch_out.rc not in [0,1]
+  changed_when: "'\"op\":\"add\"' in patch_out.stdout"
+
+- name: Wait for metrics-server rollout
+  tags: [metrics]
+  command: kubectl -n kube-system rollout status deploy/metrics-server --timeout=120s
+  changed_when: false
