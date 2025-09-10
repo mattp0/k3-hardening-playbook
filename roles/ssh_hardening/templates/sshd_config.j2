@@ -12,5 +12,6 @@ ClientAliveInterval 300
 ClientAliveCountMax 2
 AddressFamily any
 UseDNS no
+Subsystem sftp internal-sftp
 {% for line in ssh_additional_config %}{{ line }}
 {% endfor %}
