@@ -55,6 +55,41 @@
     port: "5353"
   # outbound is already allowed by default; this is explicit/harmless
 
+- name: Allow etcd client (2379) from LAN (masters only)
+  tags: [ufw]
+  when: "'masters' in group_names"
+  ufw:
+    rule: allow
+    proto: tcp
+    port: "2379"
+    src: "{{ lan_cidr }}"
+
+- name: Allow etcd peer (2380) from LAN (masters only)
+  tags: [ufw]
+  when: "'masters' in group_names"
+  ufw:
+    rule: allow
+    proto: tcp
+    port: "2380"
+    src: "{{ lan_cidr }}"
+
+- name: Allow k3s supervisor (9345) from LAN (masters only)
+  tags: [ufw]
+  when: "'masters' in group_names"
+  ufw:
+    rule: allow
+    proto: tcp
+    port: "9345"
+    src: "{{ lan_cidr }}"
+
+- name: Allow Flannel VXLAN (8472/udp) between nodes
+  tags: [ufw]
+  ufw:
+    rule: allow
+    proto: udp
+    port: "8472"
+    src: "{{ lan_cidr }}"
+
 - name: Show UFW status
   tags: [ufw]
   command: ufw status verbose
