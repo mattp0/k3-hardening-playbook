@@ -12,9 +12,5 @@ ClientAliveInterval 300
 ClientAliveCountMax 2
 AddressFamily any
 UseDNS no
-
-# Needed for Ansible file transfers and general SFTP
-Subsystem sftp /usr/lib/openssh/sftp-server
-
 {% for line in ssh_additional_config %}{{ line }}
 {% endfor %}
