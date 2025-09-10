@@ -7,54 +7,54 @@
 - name: Set default incoming deny
   tags: [ufw]
   ufw:
-  state: enabled
-  policy: deny
-  direction: incoming
+    state: enabled
+    policy: deny
+    direction: incoming
 
 
 - name: Set default outgoing allow
   tags: [ufw]
   ufw:
-  state: enabled
-  policy: allow
-  direction: outgoing
+    state: enabled
+    policy: allow
+    direction: outgoing
 
 
 - name: Allow SSH from LAN
   tags: [ufw]
   ufw:
-  rule: allow
-  proto: tcp
-  port: "{{ ssh_port }}"
-  src: "{{ lan_cidr }}"
+    rule: allow
+    proto: tcp
+    port: "{{ ssh_port }}"
+    src: "{{ lan_cidr }}"
 
 
 - name: Allow k3s API from LAN (masters only)
   tags: [ufw]
   when: "'masters' in group_names"
   ufw:
-  rule: allow
-  proto: tcp
-  port: "6443"
-  src: "{{ lan_cidr }}"
+    rule: allow
+    proto: tcp
+    port: "6443"
+    src: "{{ lan_cidr }}"
 
 
 - name: Allow mDNS if enabled
   tags: [ufw]
   when: enable_mdns
   block:
-- name: Allow inbound mDNS
-  ufw:
-  rule: allow
-  proto: udp
-  port: "5353"
-  from_ip: "224.0.0.0/4"
-- name: Allow outbound mDNS
-  ufw:
-  rule: allow
-  proto: udp
-  port: "5353"
-  to_ip: "224.0.0.0/4"
+  - name: Allow inbound mDNS
+    ufw:
+      rule: allow
+      proto: udp
+      port: "5353"
+      from_ip: "224.0.0.0/4"
+  - name: Allow outbound mDNS
+    ufw:
+      rule: allow
+      proto: udp
+      port: "5353"
+      to_ip: "224.0.0.0/4"
 
 
 - name: Show UFW status

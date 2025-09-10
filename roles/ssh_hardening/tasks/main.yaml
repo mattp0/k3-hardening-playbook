@@ -10,5 +10,5 @@
 - name: Restart SSH
   tags: [ssh]
   service:
-  name: ssh
-  state: restarted
+    name: ssh
+    state: restarted

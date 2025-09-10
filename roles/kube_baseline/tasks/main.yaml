@@ -3,11 +3,11 @@
   tags: [kube]
   command: kubectl apply -f pss-restricted-namespace.yaml
   args:
-  chdir: "{{ role_path }}/files"
+    chdir: "{{ role_path }}/files"
 
 
 - name: Apply default deny NetworkPolicy
   tags: [kube]
   command: kubectl apply -f netpol-deny-all.yaml
   args:
-  chdir: "{{ role_path }}/files"
+    chdir: "{{ role_path }}/files"

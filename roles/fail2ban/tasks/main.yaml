@@ -10,6 +10,6 @@
 - name: Enable and start fail2ban
   tags: [fail2ban]
   service:
-  name: fail2ban
-  state: started
-  enabled: true
+    name: fail2ban
+    state: started
+    enabled: true
