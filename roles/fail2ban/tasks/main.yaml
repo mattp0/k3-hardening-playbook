@@ -1,15 +1,21 @@
----
-- name: Deploy jail.local
+- name: Ensure fail2ban is installed
+  apt:
+    name: fail2ban
+    state: present
+    update_cache: true
   tags: [fail2ban]
+
+- name: Deploy jail.local
   template:
     src: jail.local.j2
     dest: /etc/fail2ban/jail.local
     mode: "0644"
-
-
-- name: Enable and start fail2ban
   tags: [fail2ban]
+
+- name: Enable and start fail2ban (only if systemd)
   service:
     name: fail2ban
     state: started
     enabled: true
+  when: ansible_service_mgr == "systemd"
+  tags: [fail2ban]
