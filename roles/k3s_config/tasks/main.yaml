@@ -12,7 +12,7 @@
     - /var/lib/rancher/k3s/server/logs
     - /etc/kubernetes/audit
 
-# Group + membership for reading kubeconfig without sudo
+# Group + membership to read kubeconfig without sudo
 - name: Ensure kubeconfig group exists (masters only)
   tags: [k3s]
   when: "'masters' in group_names"
@@ -29,7 +29,7 @@
     append: true
   loop: "{{ kubeconfig_group_users | default(['matt']) }}"
 
-# Deploy k3s config with group-readable kubeconfig
+# Deploy k3s config and trigger restart if it changed
 - name: Deploy k3s config (masters only)
   tags: [k3s]
   when: "'masters' in group_names"
@@ -52,17 +52,13 @@
       rules:
         - level: Metadata
 
-# Restart k3s if config changed (masters only)
-- name: Reload systemd and restart k3s if present (masters only)
+# Run handlers now so k3s restarts before fixing perms/symlinks
+- name: Flush handlers to apply k3s restart (masters only)
   tags: [k3s]
   when: "'masters' in group_names"
-  shell: |
-    systemctl daemon-reload || true
-    systemctl restart k3s || true
-  listen: restart k3s
-  notify: fix kubeconfig perms
+  meta: flush_handlers
 
-# Enforce group/mode on admin kubeconfig after restart
+# Enforce group/mode on admin kubeconfig
 - name: Fix kubeconfig perms (masters only)
   tags: [k3s]
   when: "'masters' in group_names"

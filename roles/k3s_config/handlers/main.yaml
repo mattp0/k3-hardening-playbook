@@ -3,11 +3,3 @@
   service:
     name: k3s
     state: restarted
-
-- name: fix kubeconfig perms
-  file:
-    path: /etc/rancher/k3s/k3s.yaml
-    state: file
-    owner: root
-    group: "{{ kubeconfig_group | default('kube') }}"
-    mode: "0640"
