@@ -2,9 +2,9 @@
 - name: Deploy jail.local
   tags: [fail2ban]
   template:
-  src: jail.local.j2
-  dest: /etc/fail2ban/jail.local
-  mode: "0644"
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    mode: "0644"
 
 
 - name: Enable and start fail2ban
