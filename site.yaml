@@ -11,4 +11,4 @@
   - role: mdns
   - role: k3s_config
   - role: kube_baseline
-  - { role: kube_vip, when: enable_kube_vip | default(false) }
+  - { role: kube_vip, when: enable_kube_vip | default(false), tags: ["kube_vip"] }
