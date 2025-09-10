@@ -3,22 +3,22 @@
   tags: [ufw]
   command: ufw --force reset
 
-
-- name: Set default incoming deny
+- name: Set default incoming policy to deny
   tags: [ufw]
   ufw:
-    state: enabled
-    policy: deny
     direction: incoming
+    policy: deny
 
+- name: Set default outgoing policy to allow
+  tags: [ufw]
+  ufw:
+    direction: outgoing
+    policy: allow
 
-- name: Set default outgoing allow
+- name: Ensure UFW is enabled
   tags: [ufw]
   ufw:
     state: enabled
-    policy: allow
-    direction: outgoing
-
 
 - name: Allow SSH from LAN
   tags: [ufw]
@@ -27,7 +27,6 @@
     proto: tcp
     port: "{{ ssh_port }}"
     src: "{{ lan_cidr }}"
-
 
 - name: Allow k3s API from LAN (masters only)
   tags: [ufw]
@@ -38,24 +37,23 @@
     port: "6443"
     src: "{{ lan_cidr }}"
 
-
-- name: Allow mDNS if enabled
+# mDNS: keep it simple—allow UDP/5353 both directions (covers multicast use-case)
+- name: Allow mDNS if enabled (inbound UDP/5353)
   tags: [ufw]
-  when: enable_mdns
-  block:
-  - name: Allow inbound mDNS
-    ufw:
-      rule: allow
-      proto: udp
-      port: "5353"
-      from_ip: "224.0.0.0/4"
-  - name: Allow outbound mDNS
-    ufw:
-      rule: allow
-      proto: udp
-      port: "5353"
-      to_ip: "224.0.0.0/4"
+  when: enable_mdns | default(false)
+  ufw:
+    rule: allow
+    proto: udp
+    port: "5353"
 
+- name: Allow mDNS if enabled (outbound UDP/5353)
+  tags: [ufw]
+  when: enable_mdns | default(false)
+  ufw:
+    rule: allow
+    proto: udp
+    port: "5353"
+  # outbound is already allowed by default; this is explicit/harmless
 
 - name: Show UFW status
   tags: [ufw]
@@ -63,7 +61,7 @@
   register: ufw_status
   changed_when: false
 
-
-- debug:
+- name: Print UFW status
+  tags: [ufw]
+  debug:
     var: ufw_status.stdout_lines
-    tags: [ufw]
