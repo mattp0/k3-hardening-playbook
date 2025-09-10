@@ -1,13 +1,27 @@
 ---
+- name: Pick an apply host (first master)
+  tags: [metrics]
+  run_once: true
+  set_fact:
+    apply_host: "{{ groups['masters'][0] }}"
+
 - name: Install/refresh metrics-server components
   tags: [metrics]
-  command: kubectl -n kube-system apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+  run_once: true
+  delegate_to: "{{ apply_host }}"
+  become: true
+  command: >
+    k3s kubectl -n kube-system apply
+    -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
   changed_when: false
 
 - name: Patch metrics-server args for k3s/bare metal
   tags: [metrics]
+  run_once: true
+  delegate_to: "{{ apply_host }}"
+  become: true
   command: >
-    kubectl -n kube-system patch deploy metrics-server --type='json'
+    k3s kubectl -n kube-system patch deploy metrics-server --type='json'
     -p='[
       {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"},
       {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-preferred-address-types=InternalIP,Hostname,InternalDNS,ExternalDNS,ExternalIP"}
@@ -18,5 +32,24 @@
 
 - name: Wait for metrics-server rollout
   tags: [metrics]
-  command: kubectl -n kube-system rollout status deploy/metrics-server --timeout=120s
+  run_once: true
+  delegate_to: "{{ apply_host }}"
+  become: true
+  command: k3s kubectl -n kube-system rollout status deploy/metrics-server --timeout=120s
   changed_when: false
+
+- name: Check Metrics APIService availability
+  tags: [metrics]
+  run_once: true
+  delegate_to: "{{ apply_host }}"
+  become: true
+  command: k3s kubectl get apiservices v1beta1.metrics.k8s.io -o jsonpath='{.status.conditions[?(@.type=="Available")].status}'
+  register: apistatus
+  changed_when: false
+
+- name: Fail if Metrics APIService not available
+  tags: [metrics]
+  run_once: true
+  fail:
+    msg: "Metrics APIService is not Available (status={{ apistatus.stdout | default('') }})"
+  when: apistatus.stdout | lower != 'true'
