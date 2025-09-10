@@ -13,3 +13,7 @@ cp group_vars/all.example.yaml group_vars/all.yaml
 ansible -m ping all
 ansible-playbook -i inventory.ini site.yaml --check
 ansible-playbook -i inventory.ini site.yaml -K
+
+ansible-playbook -i inventory.ini site.yaml -l masters --tags "ssh,ufw,fail2ban,mdns" -K
+ansible-playbook -i inventory.ini site.yaml -l workers --tags "ssh,ufw,fail2ban,mdns" -K
+ansible-playbook -i inventory.ini site.yaml -l masters --tags k3s -K
