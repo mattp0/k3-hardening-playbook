@@ -14,3 +14,4 @@
   - { role: kube_vip, when: enable_kube_vip | default(false), tags: ["kube_vip"] }
   - { role: metrics_server, tags: ["metrics"] }
   - { role: cloudflared, when: enable_cloudflare_tunnel | default(false), tags: ["cloudflared"] }
+  - { role: k8s_dashboard, tags: ["dashboard"] }
