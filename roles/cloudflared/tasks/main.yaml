@@ -19,8 +19,8 @@
       metadata:
         name: {{ cloudflared_namespace }}
 
-# Create/refresh the Secret only if a token is provided at runtime
-- name: Create/refresh cloudflared token Secret (optional)
+# 1) Render a Secret manifest with stringData (not saved to git)
+- name: Write cloudflared Secret manifest (from runtime token)
   tags: [cloudflared]
   run_once: true
   delegate_to: "{{ apply_host }}"
@@ -28,13 +28,34 @@
   when:
     - enable_cloudflare_tunnel | default(false)
     - cloudflared_tunnel_token is defined
-  shell: |
-    set -euo pipefail
-    k3s kubectl -n {{ cloudflared_namespace }} create secret generic cloudflared-token \
-      --from-literal=TUNNEL_TOKEN='{{ cloudflared_tunnel_token | quote }}' \
-      --dry-run=client -o yaml | k3s kubectl apply -f -
+  copy:
+    dest: /tmp/cloudflared-secret.yaml
+    mode: "0600"
+    content: |
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: cloudflared-token
+        namespace: {{ cloudflared_namespace }}
+      stringData:
+        TUNNEL_TOKEN: "{{ cloudflared_tunnel_token }}"
+  no_log: true
 
-# Assert the Secret exists (whether created above or manually)
+# 2) Apply it
+- name: Apply cloudflared Secret
+  tags: [cloudflared]
+  run_once: true
+  delegate_to: "{{ apply_host }}"
+  become: true
+  when:
+    - enable_cloudflare_tunnel | default(false)
+    - cloudflared_tunnel_token is defined
+  command: k3s kubectl apply -f /tmp/cloudflared-secret.yaml
+  changed_when: false
+  no_log: true
+
+# (Keep your existing assert so the run fails if no Secret exists and no token provided)
 - name: Assert token Secret exists
   tags: [cloudflared]
   run_once: true
@@ -44,6 +65,7 @@
   register: token_chk
   failed_when: token_chk.rc != 0
   changed_when: false
+
 
 # Write ConfigMap (wildcard → Traefik)
 - name: Render cloudflared config to the master
