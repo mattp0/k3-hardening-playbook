@@ -1,218 +1,60 @@
 ---
-# Run all k8s operations from the first master using k3s' kubeconfig
-- name: Select apply host (first master) and kubeconfig
-  run_once: true
-  set_fact:
-    apply_host: "{{ groups['masters'][0] }}"
-    kubeconfig_path: "/etc/rancher/k3s/k3s.yaml"
+# Traefik ↔ Kubernetes Dashboard: ServersTransport + Service/Ingress annotations
 
-# (A) Install the Dashboard
-- name: Apply Kubernetes Dashboard {{ dashboard_version }}
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  environment: { KUBECONFIG: "{{ kubeconfig_path }}" }
-  command: >
-    k3s kubectl apply -f
-    https://raw.githubusercontent.com/kubernetes/dashboard/{{ dashboard_version }}/aio/deploy/recommended.yaml
-  changed_when: false
-
-# (B) Create a ServiceAccount + RBAC (readonly by default)
-- name: Ensure SA and RBAC manifest present (readonly by default)
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  copy:
-    dest: /tmp/dashboard-rbac.yaml
-    mode: "0644"
-    content: |
-      apiVersion: v1
-      kind: ServiceAccount
-      metadata:
-        name: dashboard-viewer
-        namespace: {{ dashboard_namespace }}
-      ---
-      kind: ClusterRoleBinding
-      apiVersion: rbac.authorization.k8s.io/v1
-      metadata:
-        name: dashboard-view
-      subjects:
-        - kind: ServiceAccount
-          name: dashboard-viewer
-          namespace: {{ dashboard_namespace }}
-      roleRef:
-        kind: ClusterRole
-        name: view
-        apiGroup: rbac.authorization.k8s.io
-  when: dashboard_readonly | bool
-
-- name: Ensure SA and RBAC manifest present (cluster-admin if requested)
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  copy:
-    dest: /tmp/dashboard-rbac.yaml
-    mode: "0644"
-    content: |
-      apiVersion: v1
-      kind: ServiceAccount
-      metadata:
-        name: dashboard-admin
-        namespace: {{ dashboard_namespace }}
-      ---
-      kind: ClusterRoleBinding
-      apiVersion: rbac.authorization.k8s.io/v1
-      metadata:
-        name: dashboard-admin
-      subjects:
-        - kind: ServiceAccount
-          name: dashboard-admin
-          namespace: {{ dashboard_namespace }}
-      roleRef:
-        kind: ClusterRole
-        name: cluster-admin
-        apiGroup: rbac.authorization.k8s.io
-  when: not dashboard_readonly | bool
-
-- name: Apply SA/RBAC
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  environment: { KUBECONFIG: "{{ kubeconfig_path }}" }
-  command: k3s kubectl apply -f /tmp/dashboard-rbac.yaml
-  changed_when: false
-
-# (C) Traefik ServersTransport (skip backend TLS verify)
-- name: Create Traefik ServersTransport (insecureSkipVerify)
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  environment: { KUBECONFIG: "{{ kubeconfig_path }}" }
-  command: k3s kubectl apply -f - 
-  args:
-    stdin: |
+# 0) Apply ServersTransport that skips TLS verify for the dashboard Service
+- name: Ensure Traefik ServersTransport (insecure) exists
+  tags: [dashboard]
+  k8s:
+    state: present
+    definition:
       apiVersion: traefik.io/v1alpha1
       kind: ServersTransport
       metadata:
         name: dashboard-insecure-transport
-        namespace: {{ dashboard_namespace }}
+        namespace: kubernetes-dashboard
       spec:
         insecureSkipVerify: true
-  changed_when: false
 
-# (D) Ingress for dashboard.mperry.io (Traefik)
-- name: Apply Ingress for {{ dashboard_host }}
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  environment: { KUBECONFIG: "{{ kubeconfig_path }}" }
-  command: k3s kubectl apply -f - 
-  args:
-    stdin: |
+# 1) Put the transport on the Service (namespaced cross-provider ref is REQUIRED)
+- name: Annotate dashboard Service with ServersTransport + https scheme
+  tags: [dashboard]
+  k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: kubernetes-dashboard
+        namespace: kubernetes-dashboard
+        annotations:
+          traefik.ingress.kubernetes.io/service.serverstransport: "kubernetes-dashboard-dashboard-insecure-transport@kubernetescrd"
+          traefik.ingress.kubernetes.io/service.serversscheme: "https"
+
+# 2) Ensure/refresh the Ingress with correct entrypoints and host
+- name: Apply/patch dashboard Ingress (web + websecure to Service:443)
+  tags: [dashboard]
+  k8s:
+    state: present
+    definition:
       apiVersion: networking.k8s.io/v1
       kind: Ingress
       metadata:
         name: dashboard
-        namespace: {{ dashboard_namespace }}
+        namespace: kubernetes-dashboard
         annotations:
-          kubernetes.io/ingress.class: traefik
-          traefik.ingress.kubernetes.io/router.entrypoints: web
-          traefik.ingress.kubernetes.io/service.serversscheme: https
-          traefik.ingress.kubernetes.io/service.serverstransport: dashboard-insecure-transport@kubernetescrd
+          traefik.ingress.kubernetes.io/router.entrypoints: "web,websecure"
+          traefik.ingress.kubernetes.io/service.serversscheme: "https"
+          traefik.ingress.kubernetes.io/router.tls: "true"
       spec:
+        ingressClassName: traefik
         rules:
-        - host: {{ dashboard_host }}
-          http:
-            paths:
-            - path: /
-              pathType: Prefix
-              backend:
-                service:
-                  name: kubernetes-dashboard
-                  port:
-                    number: 443
-  changed_when: false
-
-# (E) (Optional) Lock namespace with NetworkPolicies
-- name: Apply NetworkPolicies (allow only Traefik → Dashboard; DNS egress)
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  environment: { KUBECONFIG: "{{ kubeconfig_path }}" }
-  command: k3s kubectl apply -f - 
-  args:
-    stdin: |
-      apiVersion: networking.k8s.io/v1
-      kind: NetworkPolicy
-      metadata:
-        name: default-deny
-        namespace: {{ dashboard_namespace }}
-      spec:
-        podSelector: {}
-        policyTypes: ["Ingress","Egress"]
-      ---
-      apiVersion: networking.k8s.io/v1
-      kind: NetworkPolicy
-      metadata:
-        name: allow-traefik-to-dashboard
-        namespace: {{ dashboard_namespace }}
-      spec:
-        podSelector:
-          matchLabels:
-            k8s-app: kubernetes-dashboard
-        policyTypes: ["Ingress"]
-        ingress:
-          - from:
-              - namespaceSelector:
-                  matchLabels:
-                    kubernetes.io/metadata.name: {{ traefik_namespace }}
-                podSelector:
-                  matchLabels:
-                    app.kubernetes.io/name: traefik
-      ---
-      apiVersion: networking.k8s.io/v1
-      kind: NetworkPolicy
-      metadata:
-        name: allow-dns-egress
-        namespace: {{ dashboard_namespace }}
-      spec:
-        podSelector: {}
-        policyTypes: ["Egress"]
-        egress:
-          - to:
-              - namespaceSelector:
-                  matchLabels:
-                    kubernetes.io/metadata.name: kube-system
-            ports:
-              - { protocol: UDP, port: 53 }
-              - { protocol: TCP, port: 53 }
-  changed_when: false
-
-# (F) Wait for pods and print a short-lived login token (24h)
-- name: Wait for dashboard pods
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  environment: { KUBECONFIG: "{{ kubeconfig_path }}" }
-  command: k3s kubectl -n {{ dashboard_namespace }} rollout status deploy/kubernetes-dashboard --timeout=180s
-  changed_when: false
-
-- name: Create a 24h login token for dashboard-viewer/admin
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  environment: { KUBECONFIG: "{{ kubeconfig_path }}" }
-  no_log: true
-  shell: |
-    SA="{{ 'dashboard-viewer' if dashboard_readonly else 'dashboard-admin' }}"
-    k3s kubectl -n {{ dashboard_namespace }} create token "${SA}" --duration=24h
-  register: dash_token
-
-- name: Show login instructions (token redacted in logs)
-  run_once: true
-  debug:
-    msg:
-      - "Open: https://{{ dashboard_host }}"
-      - "Login with: Service Account token (24h)"
-      - "Token (copy below; will not be stored):"
-      - "{{ dash_token.stdout }}"
+          - host: "{{ dashboard_host | default('k3-dashboard.' + cloudflare_domain) }}"
+            http:
+              paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: kubernetes-dashboard
+                      port:
+                        number: 443

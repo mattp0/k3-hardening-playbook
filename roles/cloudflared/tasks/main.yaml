@@ -23,7 +23,7 @@
       - python3-requests
     state: present
 
-# (Optional) clear a stuck progressDeadlineExceeded
+# Optional: clear a stuck rollout if requested
 - name: (Optional) Delete existing cloudflared Deployment to clear stuck rollout
   tags: [cloudflared]
   run_once: true
@@ -58,7 +58,7 @@
           metadata:
             name: "{{ cloudflared_namespace }}"
 
-    # Secret (created/updated only if you pass a token at runtime)
+    # Secret (created/updated only if you pass a token at runtime or via vault)
     - name: Create or update cloudflared token Secret (only if provided)
       when: cloudflared_tunnel_token is defined
       no_log: true
@@ -85,8 +85,8 @@
       failed_when: (token_info.resources | length) == 0
       changed_when: false
 
-    # ConfigMap: wildcard to Traefik, metrics, IPv4/QUIC toggles
-    - name: Apply ConfigMap (wildcard → Traefik)
+    # ConfigMap: wildcard to Traefik Service on 443 (Service DNS), HTTP/2 transport hints
+    - name: Apply ConfigMap (wildcard → Traefik Service on 443)
       k8s:
         state: present
         definition:
@@ -99,14 +99,15 @@
             config.yaml: |
               ingress:
                 - hostname: "*.{{ cloudflare_domain }}"
-                  service: {{ traefik_service_url }}
+                  service: https://traefik.kube-system.svc.cluster.local:443
+                  originRequest:
+                    noTLSVerify: true
                 - service: http_status:404
               metrics: 0.0.0.0:2000
+              edge-ip-version: "4"
               no-autoupdate: true
-              edge-ip-version: "{{ (cloudflared_force_ipv4 | default(true)) | ternary('4', 'auto') }}"
-              {% if cloudflared_disable_quic | default(false) %}no-quic: true{% endif %}
 
-    # Deployment (prefer IPv4; optionally disable QUIC via args too)
+    # Deployment: run cloudflared with http2 transport and config file above
     - name: Apply Deployment
       k8s:
         state: present
@@ -118,7 +119,7 @@
             namespace: "{{ cloudflared_namespace }}"
             labels: { app: cloudflared }
           spec:
-            replicas: "{{ cloudflared_replicas }}"
+            replicas: {{ cloudflared_replicas | default(2) }}
             selector: { matchLabels: { app: cloudflared } }
             template:
               metadata:
@@ -128,13 +129,13 @@
                 terminationGracePeriodSeconds: 10
                 containers:
                   - name: cloudflared
-                    image: "{{ cloudflared_image }}"
+                    image: "{{ cloudflared_image | default('cloudflare/cloudflared:2024.8.3') }}"
                     imagePullPolicy: IfNotPresent
                     args:
                       - "tunnel"
                       - "--no-autoupdate"
                       - "--protocol"
-                      - "{{ cloudflared_protocol | default('auto') }}"   # use "http2" to force TCP:443
+                      - "{{ cloudflared_protocol | default('http2') }}"
                       - "--config"
                       - "/etc/cloudflared/config/config.yaml"
                       - "run"
@@ -145,7 +146,7 @@
                             name: cloudflared-token
                             key: TUNNEL_TOKEN
                       - name: TUNNEL_TRANSPORT_PROTOCOL
-                        value: "{{ cloudflared_protocol | default('auto') }}"
+                        value: "{{ cloudflared_protocol | default('http2') }}"
                     ports:
                       - name: metrics
                         containerPort: 2000
@@ -168,8 +169,9 @@
                     configMap:
                       name: cloudflared-config
 
-    # NetworkPolicy: allow egress to kube-dns, Traefik, and Cloudflare edge
-    - name: Apply NetworkPolicy (egress to DNS + Traefik + Internet)
+    # NetworkPolicy: allow egress to DNS, cluster ranges, and Cloudflare edge
+    - name: Apply NetworkPolicy (egress to DNS + ClusterIP/Pod + Internet)
+      when: (cloudflared_enable_networkpolicy | default(true)) | bool
       k8s:
         state: present
         definition:
@@ -182,7 +184,7 @@
             podSelector: { matchLabels: { app: cloudflared } }
             policyTypes: ["Egress"]
             egress:
-              # kube-dns (name resolution) — allow to pods in kube-system on port 53
+              # kube-dns (CoreDNS) in kube-system
               - to:
                   - namespaceSelector:
                       matchLabels:
@@ -190,26 +192,18 @@
                 ports:
                   - { protocol: UDP, port: 53 }
                   - { protocol: TCP, port: 53 }
-              # Traefik (ClusterIP:80) inside the cluster
-              - to:
-                  - namespaceSelector:
-                      matchLabels:
-                        kubernetes.io/metadata.name: kube-system
-                    podSelector:
-                      matchLabels:
-                        app.kubernetes.io/name: traefik
-                ports:
-                  - { protocol: TCP, port: 80 }
-                  - { protocol: TCP, port: 443 }
-              # Cloudflare edge on the internet (QUIC + HTTPS)
-              - to:
-                  - ipBlock: { cidr: 0.0.0.0/0 }
-                ports:
-                  - { protocol: UDP, port: 7844 }  # QUIC
-                  - { protocol: TCP, port: 443 }   # HTTP/2 fallback
+              # Service IP range (ClusterIP) and Pod IP range for Traefik
+              - to: [ { ipBlock: { cidr: 10.43.0.0/16 } } ]  # Services
+                ports: [ { protocol: TCP, port: 443 }, { protocol: TCP, port: 80 } ]
+              - to: [ { ipBlock: { cidr: 10.42.0.0/16 } } ]  # Pods (Traefik 8443/8000 if ever needed)
+                ports: [ { protocol: TCP, port: 8443 }, { protocol: TCP, port: 8000 } ]
+              # Cloudflare edge (QUIC+HTTPS); QUIC may fail sometimes, HTTP/2 works fine
+              - to: [ { ipBlock: { cidr: 0.0.0.0/0 } } ]
+                ports: [ { protocol: TCP, port: 443 }, { protocol: UDP, port: 7844 } ]
 
     # NetworkPolicy: deny all ingress to cloudflared pods (client-only)
     - name: Apply NetworkPolicy (deny ingress to cloudflared pods)
+      when: (cloudflared_enable_networkpolicy | default(true)) | bool
       k8s:
         state: present
         definition:
@@ -229,7 +223,7 @@
   run_once: true
   delegate_to: "{{ apply_host }}"
   become: true
-  command: k3s kubectl -n {{ cloudflared_namespace }} rollout status deploy/cloudflared --timeout=180s
+  command: k3s kubectl -n {{ cloudflared_namespace }} rollout status deploy/cloudflared --timeout=240s
   changed_when: false
 
 - name: Show cloudflared pods
