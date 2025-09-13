@@ -143,9 +143,9 @@
                         valueFrom:
                           secretKeyRef:
                             name: cloudflared-token
-                        key: TUNNEL_TOKEN
-                  - name: TUNNEL_TRANSPORT_PROTOCOL
-                    value: "{{ cloudflared_protocol | default('auto') }}"
+                            key: TUNNEL_TOKEN
+                      - name: TUNNEL_TRANSPORT_PROTOCOL
+                        value: "{{ cloudflared_protocol | default('auto') }}"
                     ports:
                       - name: metrics
                         containerPort: 2000
