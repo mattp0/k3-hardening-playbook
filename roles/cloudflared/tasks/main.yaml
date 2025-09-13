@@ -1,5 +1,5 @@
 ---
-# Cloudflared: create namespace, secret, config, deployment, and netpols
+# Cloudflared: namespace, secret, config, deployment, netpols
 
 # 0) Pick a host to run k8s calls from (first master) and set kubeconfig path
 - name: Pick an apply host (first master)
@@ -23,6 +23,21 @@
       - python3-requests
     state: present
 
+# (Optional) clear a stuck progressDeadlineExceeded
+- name: (Optional) Delete existing cloudflared Deployment to clear stuck rollout
+  tags: [cloudflared]
+  run_once: true
+  delegate_to: "{{ apply_host }}"
+  become: true
+  environment:
+    K8S_AUTH_KUBECONFIG: "{{ cloudflared_kubeconfig }}"
+  when: cloudflared_force_recreate | default(false)
+  k8s:
+    state: absent
+    kind: Deployment
+    name: cloudflared
+    namespace: "{{ cloudflared_namespace }}"
+
 # 2) All Kubernetes operations with correct kubeconfig
 - name: Cloudflared objects (namespace/secret/config/deploy/netpols)
   tags: [cloudflared]
@@ -43,7 +58,7 @@
           metadata:
             name: "{{ cloudflared_namespace }}"
 
-    # Secret (only created/updated if you pass a token at runtime)
+    # Secret (created/updated only if you pass a token at runtime)
     - name: Create or update cloudflared token Secret (only if provided)
       when: cloudflared_tunnel_token is defined
       no_log: true
@@ -91,7 +106,7 @@
               edge-ip-version: "{{ (cloudflared_force_ipv4 | default(true)) | ternary('4', 'auto') }}"
               {% if cloudflared_disable_quic | default(false) %}no-quic: true{% endif %}
 
-    # Deployment
+    # Deployment (prefer IPv4; optionally disable QUIC via args too)
     - name: Apply Deployment
       k8s:
         state: present
@@ -110,12 +125,15 @@
                 labels: { app: cloudflared }
               spec:
                 nodeSelector: "{{ cloudflared_node_selector | default(omit) }}"
+                terminationGracePeriodSeconds: 10
                 containers:
                   - name: cloudflared
                     image: "{{ cloudflared_image }}"
+                    imagePullPolicy: IfNotPresent
                     args:
                       - "tunnel"
                       - "--no-autoupdate"
+                      - "--no-quic"
                       - "run"
                     env:
                       - name: TUNNEL_TOKEN
@@ -159,14 +177,11 @@
             podSelector: { matchLabels: { app: cloudflared } }
             policyTypes: ["Egress"]
             egress:
-              # kube-dns (name resolution)
+              # kube-dns (name resolution) — allow to pods in kube-system on port 53
               - to:
                   - namespaceSelector:
                       matchLabels:
                         kubernetes.io/metadata.name: kube-system
-                    podSelector:
-                      matchLabels:
-                        k8s-app: kube-dns
                 ports:
                   - { protocol: UDP, port: 53 }
                   - { protocol: TCP, port: 53 }
