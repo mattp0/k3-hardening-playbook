@@ -200,6 +200,7 @@
                         app.kubernetes.io/name: traefik
                 ports:
                   - { protocol: TCP, port: 80 }
+                  - { protocol: TCP, port: 443 }
               # Cloudflare edge on the internet (QUIC + HTTPS)
               - to:
                   - ipBlock: { cidr: 0.0.0.0/0 }
