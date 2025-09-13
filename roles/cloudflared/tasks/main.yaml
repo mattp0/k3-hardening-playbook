@@ -133,7 +133,6 @@
                     args:
                       - "tunnel"
                       - "--no-autoupdate"
-                      - "--no-quic"
                       - "run"
                     env:
                       - name: TUNNEL_TOKEN
