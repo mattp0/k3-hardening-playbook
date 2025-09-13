@@ -1,4 +1,17 @@
 ---
+- name: Ensure Python deps for Ansible k8s module (APT on apply host)
+  tags: [cloudflared]
+  run_once: true
+  delegate_to: "{{ apply_host }}"
+  become: true
+  apt:
+    update_cache: true
+    name:
+      - python3-kubernetes
+      - python3-yaml
+      - python3-requests
+    state: present
+
 # Run kubectl commands from a single master with built-in k3s kubeconfig
 - name: Pick an apply host (first master)
   tags: [cloudflared]
