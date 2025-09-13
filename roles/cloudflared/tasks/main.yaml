@@ -1,12 +1,14 @@
 ---
-# Run kubectl commands from a single master with built-in k3s kubeconfig
+# 0) Pick a host to run kubectl/k8s calls from (first master)
 - name: Pick an apply host (first master)
   tags: [cloudflared]
   run_once: true
   set_fact:
     apply_host: "{{ groups['masters'][0] }}"
+    cloudflared_kubeconfig: "{{ cloudflared_kubeconfig | default('/etc/rancher/k3s/k3s.yaml') }}"
 
-- name: Ensure Python deps for Ansible k8s module (APT on apply host)
+# 1) Ensure Python deps for the k8s module on the apply host
+- name: Install python kubernetes client on apply host
   tags: [cloudflared]
   run_once: true
   delegate_to: "{{ apply_host }}"
@@ -18,218 +20,159 @@
       - python3-yaml
       - python3-requests
     state: present
-  
 
-- name: Ensure namespace exists
+# 2) All k8s operations in one block with kubeconfig env set
+- name: Cloudflared objects (namespace/secret/cm/deploy/netpols)
   tags: [cloudflared]
   run_once: true
   delegate_to: "{{ apply_host }}"
   become: true
-  command: k3s kubectl apply -f - 
-  args:
-    stdin: |
-      apiVersion: v1
-      kind: Namespace
-      metadata:
-        name: {{ cloudflared_namespace }}
+  environment:
+    K8S_AUTH_KUBECONFIG: "{{ cloudflared_kubeconfig }}"
+  block:
 
-# 1) Render a Secret manifest with stringData (not saved to git)
-- name: Write cloudflared Secret manifest (from runtime token)
-  tags: [cloudflared]
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  when:
-    - enable_cloudflare_tunnel | default(false)
-    - cloudflared_tunnel_token is defined
-  copy:
-    dest: /tmp/cloudflared-secret.yaml
-    mode: "0600"
-    content: |
-      apiVersion: v1
-      kind: Secret
-      type: Opaque
-      metadata:
-        name: cloudflared-token
-        namespace: {{ cloudflared_namespace }}
-      stringData:
-        TUNNEL_TOKEN: "{{ cloudflared_tunnel_token }}"
-  no_log: true
-
-# 2) Apply it
-- name: Apply cloudflared Secret
-  tags: [cloudflared]
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  when:
-    - enable_cloudflare_tunnel | default(false)
-    - cloudflared_tunnel_token is defined
-  command: k3s kubectl apply -f /tmp/cloudflared-secret.yaml
-  changed_when: false
-  no_log: true
-
-# (Keep your existing assert so the run fails if no Secret exists and no token provided)
-- name: Assert token Secret exists
-  tags: [cloudflared]
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  command: k3s kubectl -n {{ cloudflared_namespace }} get secret cloudflared-token
-  register: token_chk
-  failed_when: token_chk.rc != 0
-  changed_when: false
-
-
-# Write ConfigMap (wildcard → Traefik)
-- name: Render cloudflared config to the master
-  tags: [cloudflared]
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  copy:
-    dest: /tmp/cloudflared-config.yaml
-    mode: "0644"
-    content: |
-      apiVersion: v1
-      kind: ConfigMap
-      metadata:
-        name: cloudflared-config
-        namespace: {{ cloudflared_namespace }}
-      data:
-        config.yaml: |
-          ingress:
-            - hostname: "*.{{ cloudflare_domain }}"
-              service: {{ traefik_service_url }}
-            - service: http_status:404
-          metrics: 0.0.0.0:2000
-          no-autoupdate: true
-
-- name: Apply ConfigMap
-  tags: [cloudflared]
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  command: k3s kubectl apply -f /tmp/cloudflared-config.yaml
-  changed_when: false
-
-# Deployment
-- name: Apply cloudflared deployment (no templating gymnastics)
-  tags: [cloudflared]
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  k8s:
-    state: present
-    definition:
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: cloudflared
-        namespace: "{{ cloudflared_namespace }}"
-        labels: { app: cloudflared }
-      spec:
-        replicas: "{{ cloudflared_replicas }}"
-        selector: { matchLabels: { app: cloudflared } }
-        template:
+    - name: Ensure namespace exists
+      k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
           metadata:
+            name: "{{ cloudflared_namespace }}"
+
+    # Create/refresh the Secret from runtime token (kept out of git)
+    - name: Create or update cloudflared token Secret (only if provided)
+      when: cloudflared_tunnel_token is defined
+      no_log: true
+      k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          type: Opaque
+          metadata:
+            name: cloudflared-token
+            namespace: "{{ cloudflared_namespace }}"
+          stringData:
+            TUNNEL_TOKEN: "{{ cloudflared_tunnel_token }}"
+
+    # Assert Secret exists regardless (created above or manually)
+    - name: Assert token Secret exists
+      k8s_info:
+        api_version: v1
+        kind: Secret
+        name: cloudflared-token
+        namespace: "{{ cloudflared_namespace }}"
+      register: token_info
+      failed_when: (token_info.resources | length) == 0
+      changed_when: false
+
+    - name: Apply ConfigMap (wildcard → Traefik)
+      k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: cloudflared-config
+            namespace: "{{ cloudflared_namespace }}"
+          data:
+            config.yaml: |
+              ingress:
+                - hostname: "*.{{ cloudflare_domain }}"
+                  service: {{ traefik_service_url }}
+                - service: http_status:404
+              metrics: 0.0.0.0:2000
+              no-autoupdate: true
+
+    - name: Apply Deployment
+      k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: cloudflared
+            namespace: "{{ cloudflared_namespace }}"
             labels: { app: cloudflared }
           spec:
-            nodeSelector: "{{ cloudflared_node_selector | default(omit) }}"
-            containers:
-            - name: cloudflared
-              image: "{{ cloudflared_image }}"
-              args: ["tunnel","--no-autoupdate","run"]
-              env:
-              - name: TUNNEL_TOKEN
-                valueFrom:
-                  secretKeyRef:
-                    name: cloudflared-token
-                    key: TUNNEL_TOKEN
-              ports: [{ name: metrics, containerPort: 2000, protocol: TCP }]
-              readinessProbe: { httpGet: { path: /ready, port: 2000 }, periodSeconds: 10 }
-              livenessProbe:  { httpGet: { path: /metrics, port: 2000 }, periodSeconds: 30 }
-              volumeMounts: [{ name: cfg, mountPath: /etc/cloudflared/config }]
-            volumes: [{ name: cfg, configMap: { name: cloudflared-config } }]
+            replicas: "{{ cloudflared_replicas }}"
+            selector: { matchLabels: { app: cloudflared } }
+            template:
+              metadata:
+                labels: { app: cloudflared }
+              spec:
+                nodeSelector: "{{ cloudflared_node_selector | default(omit) }}"
+                containers:
+                  - name: cloudflared
+                    image: "{{ cloudflared_image }}"
+                    args: ["tunnel","--no-autoupdate","run"]
+                    env:
+                      - name: TUNNEL_TOKEN
+                        valueFrom:
+                          secretKeyRef:
+                            name: cloudflared-token
+                            key: TUNNEL_TOKEN
+                    ports:
+                      - name: metrics
+                        containerPort: 2000
+                        protocol: TCP
+                    readinessProbe:
+                      httpGet: { path: /ready, port: 2000 }
+                      periodSeconds: 10
+                    livenessProbe:
+                      httpGet: { path: /metrics, port: 2000 }
+                      periodSeconds: 30
+                    volumeMounts:
+                      - name: cfg
+                        mountPath: /etc/cloudflared/config
+                volumes:
+                  - name: cfg
+                    configMap:
+                      name: cloudflared-config
 
+    - name: Apply NetworkPolicy (egress to DNS + Traefik)
+      k8s:
+        state: present
+        definition:
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata:
+            name: cloudflared-egress
+            namespace: "{{ cloudflared_namespace }}"
+          spec:
+            podSelector: { matchLabels: { app: cloudflared } }
+            policyTypes: ["Egress"]
+            egress:
+              - to:
+                  - namespaceSelector:
+                      matchLabels:
+                        kubernetes.io/metadata.name: kube-system
+                    podSelector:
+                      matchLabels:
+                        k8s-app: kube-dns
+                ports:
+                  - { protocol: UDP, port: 53 }
+                  - { protocol: TCP, port: 53 }
+              - to:
+                  - namespaceSelector:
+                      matchLabels:
+                        kubernetes.io/metadata.name: kube-system
+                    podSelector:
+                      matchLabels:
+                        app.kubernetes.io/name: traefik
+                ports:
+                  - { protocol: TCP, port: 80 }
 
-- name: Apply deployment
-  tags: [cloudflared]
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  command: k3s kubectl apply -f /tmp/cloudflared-deploy.yaml
-  changed_when: false
-
-# NetworkPolicies (egress only to DNS + Traefik, deny ingress)
-- name: Render netpols
-  tags: [cloudflared]
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  copy:
-    dest: /tmp/cloudflared-netpol.yaml
-    mode: "0644"
-    content: |
-      apiVersion: networking.k8s.io/v1
-      kind: NetworkPolicy
-      metadata:
-        name: cloudflared-egress
-        namespace: {{ cloudflared_namespace }}
-      spec:
-        podSelector: { matchLabels: { app: cloudflared } }
-        policyTypes: ["Egress"]
-        egress:
-          - to:
-              - namespaceSelector:
-                  matchLabels:
-                    kubernetes.io/metadata.name: kube-system
-                podSelector:
-                  matchLabels:
-                    k8s-app: kube-dns
-            ports:
-              - { protocol: UDP, port: 53 }
-              - { protocol: TCP, port: 53 }
-          - to:
-              - namespaceSelector:
-                  matchLabels:
-                    kubernetes.io/metadata.name: kube-system
-                podSelector:
-                  matchLabels:
-                    app.kubernetes.io/name: traefik
-            ports:
-              - { protocol: TCP, port: 80 }
-      ---
-      apiVersion: networking.k8s.io/v1
-      kind: NetworkPolicy
-      metadata:
-        name: cloudflared-ingress-deny
-        namespace: {{ cloudflared_namespace }}
-      spec:
-        podSelector: { matchLabels: { app: cloudflared } }
-        policyTypes: ["Ingress"]
-        ingress: []
-
-- name: Apply netpols
-  tags: [cloudflared]
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  command: k3s kubectl apply -f /tmp/cloudflared-netpol.yaml
-  changed_when: false
-
-- name: Wait for rollout
-  tags: [cloudflared]
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  command: k3s kubectl -n {{ cloudflared_namespace }} rollout status deploy/cloudflared --timeout=180s
-  changed_when: false
-
-- name: Show pod status
-  tags: [cloudflared]
-  run_once: true
-  delegate_to: "{{ apply_host }}"
-  become: true
-  command: k3s kubectl -n {{ cloudflared_namespace }} get pods -o wide
-  changed_when: false
+    - name: Apply NetworkPolicy (deny ingress to cloudflared pods)
+      k8s:
+        state: present
+        definition:
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata:
+            name: cloudflared-ingress-deny
+            namespace: "{{ cloudflared_namespace }}"
+          spec:
+            podSelector: { matchLabels: { app: cloudflared } }
+            policyTypes: ["Ingress"]
