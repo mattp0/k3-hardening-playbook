@@ -100,61 +100,44 @@
   changed_when: false
 
 # Deployment
-- name: Render cloudflared deployment to the master
+- name: Apply cloudflared deployment (no templating gymnastics)
   tags: [cloudflared]
   run_once: true
   delegate_to: "{{ apply_host }}"
   become: true
-  copy:
-    dest: /tmp/cloudflared-deploy.yaml
-    mode: "0644"
-    content: |
+  k8s:
+    state: present
+    definition:
       apiVersion: apps/v1
       kind: Deployment
       metadata:
         name: cloudflared
-        namespace: {{ cloudflared_namespace }}
+        namespace: "{{ cloudflared_namespace }}"
         labels: { app: cloudflared }
       spec:
-        replicas: {{ cloudflared_replicas }}
+        replicas: "{{ cloudflared_replicas }}"
         selector: { matchLabels: { app: cloudflared } }
         template:
           metadata:
             labels: { app: cloudflared }
           spec:
-            {{- if cloudflared_node_selector and cloudflared_node_selector | length }}
-            nodeSelector:
-            {%- for k, v in cloudflared_node_selector.items() %}
-              {{ k }}: "{{ v }}"
-            {%- endfor %}
-            {{- endif }}
+            nodeSelector: "{{ cloudflared_node_selector | default(omit) }}"
             containers:
             - name: cloudflared
-              image: {{ cloudflared_image }}
-              args: ["tunnel", "--no-autoupdate", "run"]
+              image: "{{ cloudflared_image }}"
+              args: ["tunnel","--no-autoupdate","run"]
               env:
               - name: TUNNEL_TOKEN
                 valueFrom:
                   secretKeyRef:
                     name: cloudflared-token
                     key: TUNNEL_TOKEN
-              ports:
-              - name: metrics
-                containerPort: 2000
-                protocol: TCP
-              readinessProbe:
-                httpGet: { path: /ready, port: 2000 }
-                periodSeconds: 10
-              livenessProbe:
-                httpGet: { path: /metrics, port: 2000 }
-                periodSeconds: 30
-              volumeMounts:
-              - name: cfg
-                mountPath: /etc/cloudflared/config
-            volumes:
-            - name: cfg
-              configMap:
-                name: cloudflared-config
+              ports: [{ name: metrics, containerPort: 2000, protocol: TCP }]
+              readinessProbe: { httpGet: { path: /ready, port: 2000 }, periodSeconds: 10 }
+              livenessProbe:  { httpGet: { path: /metrics, port: 2000 }, periodSeconds: 30 }
+              volumeMounts: [{ name: cfg, mountPath: /etc/cloudflared/config }]
+            volumes: [{ name: cfg, configMap: { name: cloudflared-config } }]
+
 
 - name: Apply deployment
   tags: [cloudflared]
