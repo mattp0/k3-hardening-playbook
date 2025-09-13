@@ -133,13 +133,19 @@
                     args:
                       - "tunnel"
                       - "--no-autoupdate"
+                      - "--protocol"
+                      - "{{ cloudflared_protocol | default('auto') }}"   # use "http2" to force TCP:443
+                      - "--config"
+                      - "/etc/cloudflared/config/config.yaml"
                       - "run"
                     env:
                       - name: TUNNEL_TOKEN
                         valueFrom:
                           secretKeyRef:
                             name: cloudflared-token
-                            key: TUNNEL_TOKEN
+                        key: TUNNEL_TOKEN
+                  - name: TUNNEL_TRANSPORT_PROTOCOL
+                    value: "{{ cloudflared_protocol | default('auto') }}"
                     ports:
                       - name: metrics
                         containerPort: 2000
